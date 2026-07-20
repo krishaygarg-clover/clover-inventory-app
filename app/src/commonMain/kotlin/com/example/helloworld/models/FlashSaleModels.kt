@@ -1,0 +1,37 @@
+package com.example.helloworld.models
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class FlashItem(
+    val id: String,
+    val name: String,
+    val price: Long // Price in cents
+)
+
+@Serializable
+data class FlashDeal(
+    val itemId: String,
+    val itemName: String,
+    val originalPrice: Long,
+    val flashPrice: Long,
+    val expiryTimestamp: Long
+)
+
+@Serializable
+data class CloverItemResponse(
+    val elements: List<CloverItem> = emptyList()
+)
+
+@Serializable
+data class CloverItem(
+    val id: String? = null,
+    val name: String? = null,
+    val price: Long? = null
+)
+
+@Serializable
+data class CloverAddItemRequest(
+    val name: String,
+    val price: Long
+)
