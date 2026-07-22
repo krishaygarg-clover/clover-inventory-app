@@ -11,11 +11,22 @@ data class FlashItem(
 
 @Serializable
 data class FlashDeal(
-    val itemId: String,
+    val itemId: String, // Can be "combo_id" for bundles
     val itemName: String,
     val originalPrice: Long,
     val flashPrice: Long,
-    val expiryTimestamp: Long
+    val expiryTimestamp: Long,
+    val description: String = "",
+    val isCombo: Boolean = false
+)
+
+@Serializable
+data class FlashCombo(
+    val id: String,
+    val name: String,
+    val itemIds: List<String>,
+    val bundlePrice: Long,
+    val description: String
 )
 
 @Serializable
