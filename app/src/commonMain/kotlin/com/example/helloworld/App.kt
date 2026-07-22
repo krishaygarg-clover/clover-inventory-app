@@ -1,9 +1,14 @@
 package com.example.helloworld
 
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.*
@@ -11,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,146 +29,192 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.helloworld.models.FlashDeal
 import com.example.helloworld.models.FlashItem
-import com.example.helloworld.services.DealService
-import com.example.helloworld.services.InventoryService
-import com.example.helloworld.services.initiatePayment
+import com.example.helloworld.services.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+fun formatPrice(cents: Long): String {
+    val dollars = cents / 100
+    val remainder = cents % 100
+    return "$dollars.${remainder.toString().padStart(2, '0')}"
+}
+
 @Composable
-fun App() {
+fun App(aiService: AIService? = null) {
     val lightColors = lightColors(
         primary = Color(0xFF007A33),
         primaryVariant = Color(0xFF004B1A),
-        secondary = Color(0xFF343434),
-        background = Color(0xFFEEEEEE)
+        secondary = Color(0xFF1A1A1A),
+        background = Color(0xFFF5F5F5),
+        surface = Color.White,
+        error = Color(0xFFB00020)
     )
 
     MaterialTheme(colors = lightColors) {
-        val inventoryService = remember { InventoryService("KBAPSVKBCCTM1", "b157b1e8-42e4-d122-2e33-2a5b142373b7") }
-        var items by remember { mutableStateOf(emptyList<FlashItem>()) }
-        val scope = rememberCoroutineScope()
-        var isLoading by remember { mutableStateOf(false) }
-        var showAddDialog by remember { mutableStateOf(false) }
-        val scaffoldState = rememberScaffoldState()
-        
-        val activeDeal by DealService.activeDeal.collectAsState()
-        var selectedItemForFlash by remember { mutableStateOf<FlashItem?>(null) }
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colors.background)) {
+            val inventoryService = remember { InventoryService(Constants.CLOVER_MERCHANT_ID, Constants.CLOVER_API_TOKEN) }
+            val resolvedAiService = remember { aiService ?: AIService() }
+            
+            var items by remember { mutableStateOf(emptyList<FlashItem>()) }
+            var insights by remember { mutableStateOf(emptyList<AIInsight>()) }
+            
+            val scope = rememberCoroutineScope()
+            var isLoading by remember { mutableStateOf(false) }
+            var showAddDialog by remember { mutableStateOf(false) }
+            val scaffoldState = rememberScaffoldState()
 
-        fun loadInventory() {
-            scope.launch {
-                isLoading = true
-                items = inventoryService.getInventory()
-                isLoading = false
-            }
-        }
+            val activeDeals by DealService.activeDeals.collectAsState()
+            var selectedItemForFlash by remember { mutableStateOf<FlashItem?>(null) }
+            val itemDescriptions = remember { mutableStateMapOf<String, String>() }
 
-        LaunchedEffect(Unit) {
-            loadInventory()
-        }
-
-        Scaffold(
-            scaffoldState = scaffoldState,
-            topBar = {
-                TopAppBar(
-                    title = { Text("Inventory Manager", modifier = Modifier.padding(start = 8.dp)) },
-                    backgroundColor = MaterialTheme.colors.primary,
-                    contentColor = Color.White,
-                    elevation = 8.dp,
-                    actions = {
-                        IconButton(onClick = { loadInventory() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            fun loadInventory() {
+                scope.launch {
+                    isLoading = true
+                    items = inventoryService.getInventory()
+                    insights = resolvedAiService.getMerchantInsights(items)
+                    
+                    // NEW: Generate descriptions for all items in memory
+                    items.forEach { item ->
+                        if (!itemDescriptions.containsKey(item.id)) {
+                            itemDescriptions[item.id] = resolvedAiService.generateDescription(item.name, item.id)
                         }
                     }
-                )
-            },
-            floatingActionButton = {
-                if (activeDeal == null) {
-                    FloatingActionButton(
-                        onClick = { showAddDialog = true },
-                        backgroundColor = MaterialTheme.colors.primary,
-                        contentColor = Color.White,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Item")
-                    }
+                    isLoading = false
                 }
             }
-        ) { padding ->
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colors.background).padding(padding), contentAlignment = Alignment.TopCenter) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 600.dp) 
-                        .padding(horizontal = 16.dp)
-                ) {
-                    if (isLoading && items.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = MaterialTheme.colors.primary)
-                        }
-                    } else if (items.isEmpty() && activeDeal == null) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No items found. Click + to add one.", style = MaterialTheme.typography.h6, color = Color.Gray)
-                        }
-                    } else {
-                        if (activeDeal != null) {
-                            CustomerDealView(activeDeal!!, onReset = {
-                                DealService.publishDeal(null)
-                            })
-                        } else {
-                            MerchantInventoryView(
-                                items = items,
-                                onDelete = { item ->
-                                    scope.launch {
-                                        val success = inventoryService.deleteItem(item.id)
-                                        if (success) {
-                                            loadInventory()
-                                            scaffoldState.snackbarHostState.showSnackbar("Deleted ${item.name}")
-                                        } else {
-                                            scaffoldState.snackbarHostState.showSnackbar("Error deleting item")
-                                        }
-                                    }
-                                },
-                                onFlashClick = { selectedItemForFlash = it }
-                            )
-                        }
-                    }
-                }
 
-                if (showAddDialog) {
-                    AddItemDialog(
-                        onDismiss = { showAddDialog = false },
-                        onConfirm = { name, price ->
-                            scope.launch {
-                                val success = inventoryService.addItem(name, price)
-                                if (success) {
-                                    loadInventory()
-                                    showAddDialog = false
-                                    scaffoldState.snackbarHostState.showSnackbar("Item added: $name")
-                                } else {
-                                    scaffoldState.snackbarHostState.showSnackbar("Failed to add item")
+            LaunchedEffect(Unit) {
+                loadInventory()
+            }
+
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                scaffoldState = scaffoldState,
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text("Clover Flash", style = MaterialTheme.typography.h6, fontWeight = FontWeight.Bold)
+                                Text("Inventory & Deals", style = MaterialTheme.typography.caption)
+                            }
+                        },
+                        backgroundColor = MaterialTheme.colors.surface,
+                        contentColor = MaterialTheme.colors.primary,
+                        elevation = 0.dp,
+                        actions = {
+                            IconButton(onClick = { loadInventory() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                            }
+                            if (activeDeals.isNotEmpty()) {
+                                TextButton(onClick = { DealService.clearAllDeals() }) {
+                                    Text("Clear All Deals", color = MaterialTheme.colors.error)
                                 }
                             }
                         }
                     )
-                }
-                
-                selectedItemForFlash?.let { item ->
-                    FlashPriceDialog(
-                        item = item,
-                        onDismiss = { selectedItemForFlash = null },
-                        onConfirm = { flashPrice ->
-                            DealService.publishDeal(
-                                FlashDeal(
-                                    itemId = item.id,
-                                    itemName = item.name,
-                                    originalPrice = item.price,
-                                    flashPrice = flashPrice,
-                                    expiryTimestamp = 0L
-                                )
-                            )
-                            selectedItemForFlash = null
+                },
+                floatingActionButton = {
+                    if (activeDeals.isEmpty()) {
+                        FloatingActionButton(
+                            onClick = { showAddDialog = true },
+                            backgroundColor = MaterialTheme.colors.primary,
+                            contentColor = Color.White,
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Item")
                         }
-                    )
+                    }
+                }
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    AnimatedContent(
+                        targetState = activeDeals.isNotEmpty(),
+                        transitionSpec = {
+                            fadeIn() togetherWith fadeOut()
+                        }
+                    ) { showingDeals ->
+                        if (showingDeals) {
+                            Box(modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize()) {
+                                CustomerDealView(activeDeals, onReset = {
+                                    DealService.clearAllDeals()
+                                }, onRemoveDeal = { 
+                                    DealService.removeDeal(it.itemId)
+                                })
+                            }
+                        } else {
+                            if (isLoading && items.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = MaterialTheme.colors.primary)
+                                }
+                            } else if (items.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("No items found. Click + to add one.", style = MaterialTheme.typography.h6, color = Color.Gray)
+                                }
+                            } else {
+                                Box(modifier = Modifier.widthIn(max = 1400.dp).fillMaxSize()) {
+                                    MerchantInventoryView(
+                                        items = items,
+                                        insights = insights,
+                                        itemDescriptions = itemDescriptions,
+                                        onDelete = { item ->
+                                            scope.launch {
+                                                val success = inventoryService.deleteItem(item.id)
+                                                if (success) {
+                                                    loadInventory()
+                                                    scaffoldState.snackbarHostState.showSnackbar("Deleted ${item.name}")
+                                                } else {
+                                                    scaffoldState.snackbarHostState.showSnackbar("Error deleting item")
+                                                }
+                                            }
+                                        },
+                                        onFlashClick = { selectedItemForFlash = it }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (showAddDialog) {
+                        AddItemDialog(
+                            onDismiss = { showAddDialog = false },
+                            onConfirm = { name, price ->
+                                scope.launch {
+                                    val success = inventoryService.addItem(name, price)
+                                    if (success) {
+                                        loadInventory()
+                                        showAddDialog = false
+                                        scaffoldState.snackbarHostState.showSnackbar("Item added: $name")
+                                    } else {
+                                        scaffoldState.snackbarHostState.showSnackbar("Failed to add item")
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    selectedItemForFlash?.let { item ->
+                        FlashPriceDialog(
+                            item = item,
+                            onDismiss = { selectedItemForFlash = null },
+                            onConfirm = { flashPrice, durationMinutes ->
+                                DealService.publishDeal(
+                                    FlashDeal(
+                                        itemId = item.id,
+                                        itemName = item.name,
+                                        originalPrice = item.price,
+                                        flashPrice = flashPrice,
+                                        expiryTimestamp = (durationMinutes * 60 * 1000).toLong() // Simplified for demo
+                                    )
+                                )
+                                selectedItemForFlash = null
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -172,56 +224,203 @@ fun App() {
 @Composable
 fun MerchantInventoryView(
     items: List<FlashItem>,
+    insights: List<AIInsight>,
+    itemDescriptions: Map<String, String>,
     onDelete: (FlashItem) -> Unit,
     onFlashClick: (FlashItem) -> Unit
 ) {
-    LazyColumn(
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 350.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(24.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        item {
-            Text(
-                "Current Store Inventory",
-                style = MaterialTheme.typography.h5,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+        if (insights.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Text(
+                        "AI Recommendations",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF007A33),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        insights.forEach { insight ->
+                            RecommendationCard(insight, items, onFlashClick)
+                        }
+                    }
+                    Spacer(Modifier.height(32.dp))
+                }
+            }
+        }
+
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                Text(
+                    "Store Inventory",
+                    style = MaterialTheme.typography.h4,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colors.secondary
+                )
+                Text(
+                    "Manage your products and launch flash deals",
+                    style = MaterialTheme.typography.subtitle1,
+                    color = Color.Gray
+                )
+                Spacer(Modifier.height(16.dp))
+                Divider(thickness = 1.dp, color = Color.LightGray.copy(alpha = 0.5f))
+            }
         }
         items(items) { item ->
-            InventoryItemRow(item, onDelete, onFlashClick)
+            InventoryItemRow(
+                item = item,
+                description = itemDescriptions[item.id] ?: "Generating description...",
+                onDelete = onDelete,
+                onFlashClick = onFlashClick
+            )
         }
     }
 }
 
 @Composable
-fun InventoryItemRow(item: FlashItem, onDelete: (FlashItem) -> Unit, onFlashClick: (FlashItem) -> Unit) {
+fun RecommendationCard(insight: AIInsight, items: List<FlashItem>, onFlashClick: (FlashItem) -> Unit) {
+    val item = items.find { it.id == insight.suggestedItemId }
+    val combo = insight.suggestedCombo
+    
     Card(
-        shape = RoundedCornerShape(12.dp),
-        elevation = 4.dp,
+        modifier = Modifier.width(300.dp),
+        shape = RoundedCornerShape(16.dp),
+        backgroundColor = Color(0xFF007A33).copy(alpha = 0.05f),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, Color(0xFF007A33).copy(alpha = 0.2f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = if (combo != null) Color(0xFF6200EE) else Color(0xFF007A33),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        if (combo != null) "COMBO" else insight.type.name,
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(insight.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.subtitle1)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(insight.description, style = MaterialTheme.typography.body2, color = Color.DarkGray)
+            
+            if (item != null || combo != null) {
+                Spacer(Modifier.height(12.dp))
+                Divider(color = Color(0xFF007A33).copy(alpha = 0.1f))
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        val suggestedPrice = combo?.bundlePrice ?: (item!!.price * (1 - insight.suggestedDiscount)).toLong()
+                        Text(combo?.name ?: item!!.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            "Deal: $" + formatPrice(suggestedPrice),
+                            color = Color(0xFF007A33),
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Button(
+                        onClick = { 
+                            if (combo != null) {
+                                DealService.publishDeal(
+                                    FlashDeal(
+                                        itemId = combo.id,
+                                        itemName = combo.name,
+                                        originalPrice = items.filter { it.id in combo.itemIds }.sumOf { it.price },
+                                        flashPrice = combo.bundlePrice,
+                                        expiryTimestamp = 600000L,
+                                        description = combo.description,
+                                        isCombo = true
+                                    )
+                                )
+                            } else {
+                                onFlashClick(item!!)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = if (combo != null) Color(0xFF6200EE) else Color(0xFF007A33)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("APPLY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InventoryItemRow(
+    item: FlashItem, 
+    description: String,
+    onDelete: (FlashItem) -> Unit, 
+    onFlashClick: (FlashItem) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        elevation = 0.dp,
+        backgroundColor = MaterialTheme.colors.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            modifier = Modifier.padding(20.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = item.name, style = MaterialTheme.typography.h6, fontWeight = FontWeight.Bold)
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.h6,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colors.secondary
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.caption,
+                    color = Color.Gray
+                )
                 Spacer(Modifier.height(4.dp))
-                Text(text = "$" + (item.price / 100.0).toString(), style = MaterialTheme.typography.subtitle1, color = Color(0xFF007A33))
+                Text(
+                    text = "$" + formatPrice(item.price),
+                    style = MaterialTheme.typography.body1,
+                    color = Color(0xFF007A33),
+                    fontWeight = FontWeight.Medium
+                )
             }
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { onFlashClick(item) },
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF007A33), contentColor = Color.White),
-                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF007A33).copy(alpha = 0.1f), contentColor = Color(0xFF007A33)),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = ButtonDefaults.elevation(0.dp),
                     modifier = Modifier.padding(end = 8.dp)
                 ) {
-                    Text("FLASH")
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("FLASH", fontWeight = FontWeight.Bold)
                 }
                 IconButton(onClick = { onDelete(item) }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFD32F2F))
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color.Gray.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
@@ -229,47 +428,123 @@ fun InventoryItemRow(item: FlashItem, onDelete: (FlashItem) -> Unit, onFlashClic
 }
 
 @Composable
-fun CustomerDealView(deal: FlashDeal, onReset: () -> Unit) {
+fun CustomerDealView(deals: List<FlashDeal>, onReset: () -> Unit, onRemoveDeal: (FlashDeal) -> Unit) {
+    var timeLeft by remember { mutableStateOf(600) } // 10 minutes demo
+
+    LaunchedEffect(Unit) {
+        while (timeLeft > 0) {
+            delay(1000)
+            timeLeft--
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
-        Text("LIMITED TIME DEAL!", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(Modifier.height(16.dp))
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            elevation = 12.dp, 
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(deal.itemName, style = MaterialTheme.typography.h4, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(8.dp))
+            Surface(
+                color = Color.Red,
+                shape = RoundedCornerShape(8.dp)
+            ) {
                 Text(
-                    "Regular Price: $" + (deal.originalPrice / 100.0).toString(),
-                    style = MaterialTheme.typography.h6.copy(textDecoration = TextDecoration.LineThrough),
-                    color = Color.Gray
+                    "FLASH SALES ACTIVE",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
                 )
-                Text(
-                    "FLASH PRICE: $" + (deal.flashPrice / 100.0).toString(),
-                    color = Color(0xFF007A33),
-                    style = MaterialTheme.typography.h2,
-                    fontWeight = FontWeight.Black
-                )
-                Spacer(Modifier.height(32.dp))
+            }
+
+            Text(
+                "Ends in ${timeLeft / 60}:${(timeLeft % 60).toString().padStart(2, '0')}",
+                style = MaterialTheme.typography.h6,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colors.secondary
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            items(deals) { deal ->
+                DealCard(deal, onRemove = { onRemoveDeal(deal) })
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        TextButton(onClick = onReset) {
+            Text("Clear All and Return to Inventory", color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun DealCard(deal: FlashDeal, onRemove: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        elevation = 8.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(deal.itemName, style = MaterialTheme.typography.h4, fontWeight = FontWeight.Black)
+                    if (deal.description.isNotEmpty()) {
+                        Text(deal.description, style = MaterialTheme.typography.body1, color = Color.Gray)
+                    }
+                }
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove Deal", tint = Color.LightGray)
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Original: $" + formatPrice(deal.originalPrice),
+                        style = MaterialTheme.typography.h6.copy(textDecoration = TextDecoration.LineThrough),
+                        color = Color.Gray
+                    )
+                    Text(
+                        "$" + formatPrice(deal.flashPrice),
+                        color = Color(0xFF007A33),
+                        style = MaterialTheme.typography.h3,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+                
                 Button(
                     onClick = { initiatePayment(deal.flashPrice) },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    modifier = Modifier.height(56.dp).width(160.dp),
                     shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF007A33), contentColor = Color.White)
                 ) {
                     Text("PAY NOW", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
-        }
-        Spacer(Modifier.height(24.dp))
-        TextButton(onClick = onReset) {
-             Text("Back to Inventory", color = Color.Gray)
         }
     }
 }
@@ -337,19 +612,30 @@ fun AddItemDialog(onDismiss: () -> Unit, onConfirm: (String, Long) -> Unit) {
 }
 
 @Composable
-fun FlashPriceDialog(item: FlashItem, onDismiss: () -> Unit, onConfirm: (Long) -> Unit) {
+fun FlashPriceDialog(item: FlashItem, onDismiss: () -> Unit, onConfirm: (Long, Int) -> Unit) {
     var priceInput by remember { mutableStateOf((item.price * 0.8).toLong().toString()) }
+    var durationMinutes by remember { mutableStateOf("10") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Set Flash Price for ${item.name}") },
+        title = { Text("Configure Flash Sale: ${item.name}", fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.width(300.dp)) {
-                Text("Enter the new price in cents:")
-                Spacer(Modifier.height(8.dp))
+                Text("Set the discount price and how long it should last.")
+                Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
                     value = priceInput,
                     onValueChange = { if (it.all { char -> char.isDigit() }) priceInput = it },
-                    label = { Text("Price in cents (e.g. 500 for $5.00)") },
+                    label = { Text("Flash Price (cents)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = durationMinutes,
+                    onValueChange = { if (it.all { char -> char.isDigit() }) durationMinutes = it },
+                    label = { Text("Duration (minutes)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -357,13 +643,21 @@ fun FlashPriceDialog(item: FlashItem, onDismiss: () -> Unit, onConfirm: (Long) -
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(priceInput.toLongOrNull() ?: 0L) }) {
-                Text("START FLASH SALE")
+            Button(
+                onClick = {
+                    onConfirm(
+                        priceInput.toLongOrNull() ?: 0L,
+                        durationMinutes.toIntOrNull() ?: 10
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF007A33), contentColor = Color.White)
+            ) {
+                Text("GO LIVE!")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("CANCEL")
             }
         }
     )

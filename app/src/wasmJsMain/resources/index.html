@@ -3,10 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <title>HelloWorld Web</title>
+    <!-- MediaPipe GenAI for Local LLM -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@0.10.14"></script>
     <!-- Clover.js SDK for Ecommerce -->
     <script src="https://checkout.sandbox.dev.clover.com/sdk.js"></script>
+    <style>
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #EEEEEE;
+        }
+        #app-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+        }
+    </style>
     <script src="composeApp.js"></script>
 </head>
 <body>
+    <div id="app-container"></div>
 </body>
 </html>
