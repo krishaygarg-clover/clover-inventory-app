@@ -93,11 +93,48 @@ fun App(aiService: AIService? = null) {
                 topBar = {
                     TopAppBar(
                         title = {
-                            Column {
-                                Text("Clover Flash", style = MaterialTheme.typography.h6, fontWeight = FontWeight.Bold)
-                                Text("Inventory & Deals", style = MaterialTheme.typography.caption)
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text("Clover Flash", style = MaterialTheme.typography.h6, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Inventory & Deals", style = MaterialTheme.typography.caption, color = Color.Gray)
+                                Spacer(Modifier.width(12.dp))
+                                if (resolvedAiService.isAiReady) {
+                                    Surface(
+                                        color = Color(0xFF007A33).copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            "AI READY", 
+                                            color = Color(0xFF007A33), 
+                                            fontSize = 9.sp, 
+                                            fontWeight = FontWeight.Black, 
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                } else {
+                                    var currentProgress by remember { mutableStateOf(0.0) }
+                                    LaunchedEffect(Unit) {
+                                        while (true) {
+                                            currentProgress = resolvedAiService.aiProgress
+                                            delay(500)
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("AI LOADING ${(currentProgress * 100).toInt()}%", style = MaterialTheme.typography.caption, color = Color.Gray, fontSize = 8.sp)
+                                        Spacer(Modifier.width(4.dp))
+                                        Box(modifier = Modifier.width(60.dp)) {
+                                            LinearProgressIndicator(
+                                                progress = currentProgress.toFloat(),
+                                                modifier = Modifier.fillMaxWidth().height(4.dp),
+                                                color = Color(0xFF007A33),
+                                                backgroundColor = Color.LightGray.copy(alpha = 0.3f)
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        },
+                        }
+                    },
                         backgroundColor = MaterialTheme.colors.surface,
                         contentColor = MaterialTheme.colors.primary,
                         elevation = 0.dp,
@@ -352,11 +389,15 @@ fun RecommendationCard(insight: AIInsight, items: List<FlashItem>, onFlashClick:
                                 onFlashClick(item!!)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = if (combo != null) Color(0xFF6200EE) else Color(0xFF007A33)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (combo != null) Color(0xFF6200EE) else Color(0xFF007A33),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = ButtonDefaults.elevation(defaultElevation = 2.dp, pressedElevation = 0.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text("APPLY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("APPLY", fontSize = 13.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -405,21 +446,25 @@ fun InventoryItemRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { onFlashClick(item) },
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF007A33).copy(alpha = 0.1f), contentColor = Color(0xFF007A33)),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF007A33).copy(alpha = 0.12f), 
+                        contentColor = Color(0xFF007A33)
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     elevation = ButtonDefaults.elevation(0.dp),
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier.height(40.dp)
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("FLASH", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("FLASH", fontWeight = FontWeight.Black, fontSize = 13.sp)
                 }
+                Spacer(Modifier.width(12.dp))
                 IconButton(onClick = { onDelete(item) }) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = "Delete",
                         tint = Color.Gray.copy(alpha = 0.4f),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }

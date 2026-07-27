@@ -57,7 +57,6 @@ kotlin {
                 implementation(libs.androidx.constraintlayout)
                 implementation(libs.material)
                 implementation("androidx.activity:activity-compose:1.8.0")
-                implementation(libs.mediapipe.genai)
             }
         }
         val wasmJsMain by getting {
